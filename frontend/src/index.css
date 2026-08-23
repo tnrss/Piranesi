@@ -1,0 +1,29 @@
+:root {
+  --text: #ffffff;
+  --heading: #bd064c;
+  --bg: #23282b;
+  --accent: #bd064c;
+  --mono: 'Space Mono', monospace;
+
+  font: 16px/145% var(--mono);
+  letter-spacing: 0;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  @media (max-width: 1024px) {
+    font-size: 16px;
+  }
+}
+
+#root {
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+}

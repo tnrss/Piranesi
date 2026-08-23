@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+
+# Local database and environment
+backend/.env
+backend/piranesi.db
+
+# Frontend local env (if added later)
+frontend/.env
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

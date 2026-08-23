@@ -1,0 +1,8 @@
+Piranesi is a life log I'm building to assist me.
+I want to connect Plaid for credit card balances and bank of america account/savings so I can track my finances, track my exam schedules, due dates, assignments
+put in my weekly work hours which will calculate my expected pay given my $18 hourly and hour cap of 28 hours.
+the main accent color will be a reddish pink (#bd064c), the background will be gray (#23282b)
+and then white text other than headings
+The UI should be neobrutalism style, highly cusomizable and modular and look nice.
+
+I want to plan it out, and build it, tracking everything in a readme

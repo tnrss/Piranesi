@@ -1,0 +1,195 @@
+.terminal-shell {
+  min-height: 100vh;
+  width: min(1240px, 100% - 2rem);
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: 1rem 0 1.5rem;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto auto;
+  gap: 1rem;
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.terminal-header,
+.terminal-overview,
+.terminal-footer {
+  border: 1px solid color-mix(in srgb, var(--text) 55%, transparent);
+  padding: 0.7rem 0.9rem;
+}
+
+.terminal-header,
+.prompt-line {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.terminal-brand,
+.pane-title,
+.block-title,
+.accent {
+  color: var(--accent);
+}
+
+.terminal-brand,
+.pane-title,
+.block-title {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.terminal-status {
+  margin-left: auto;
+  color: color-mix(in srgb, var(--text) 72%, transparent);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.terminal-overview p,
+.terminal-block p,
+.terminal-history p,
+.terminal-footer p {
+  margin: 0.35rem 0;
+  line-height: 1.45;
+}
+
+.terminal-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+  gap: 1rem;
+  min-height: 0;
+}
+
+.terminal-pane {
+  border: 1px solid color-mix(in srgb, var(--text) 55%, transparent);
+  min-width: 0;
+}
+
+.pane-title {
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 55%, transparent);
+  padding: 0.7rem 0.9rem;
+}
+
+.terminal-block {
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px dashed color-mix(in srgb, var(--text) 35%, transparent);
+}
+
+.terminal-block:last-child {
+  border-bottom: 0;
+}
+
+.block-title {
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.warn {
+  color: #f7c948;
+}
+
+.muted {
+  color: color-mix(in srgb, var(--text) 60%, transparent);
+}
+
+.command-links {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+}
+
+.command-links button {
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.command-links button:hover,
+.command-links button:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+  transform: none;
+}
+
+.prompt-line input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  box-shadow: none;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.prompt-line input::placeholder {
+  color: color-mix(in srgb, var(--text) 45%, transparent);
+}
+
+.terminal-suggestions {
+  border: 1px solid color-mix(in srgb, var(--text) 55%, transparent);
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0.65rem 0;
+}
+
+.terminal-suggestions button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 0;
+  box-shadow: none;
+  border-bottom: 1px dashed color-mix(in srgb, var(--text) 25%, transparent);
+  background: transparent;
+  color: var(--text);
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.terminal-suggestions button:last-child {
+  border-bottom: 0;
+}
+
+.terminal-suggestions button.selected,
+.terminal-suggestions button:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.cursor {
+  color: var(--accent);
+}
+
+@media (max-width: 800px) {
+  .terminal-shell {
+    width: min(100% - 1rem, 1240px);
+    padding-top: 0.5rem;
+  }
+
+  .terminal-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .terminal-status {
+    margin-left: 0;
+    text-align: left;
+  }
+
+  .terminal-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .command-links {
+    gap: 0.6rem 0.9rem;
+  }
+}
