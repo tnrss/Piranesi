@@ -1,7 +1,9 @@
-from datetime import date, datetime
-from typing import Optional
+"""Pydantic request/response models used by the FastAPI routes in main.py."""
 
-from pydantic import BaseModel, ConfigDict
+from datetime import date, datetime
+from typing import Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class WorkShiftBase(BaseModel):
     date: date
@@ -95,12 +97,30 @@ class FinanceSummary(BaseModel):
     net_worth: float
 
 
+class LiabilityInfo(BaseModel):
+    account_id: Optional[int] = None
+    plaid_account_id: str
+    account_name: str
+    next_payment_due_date: Optional[date] = None
+    minimum_payment_amount: Optional[float] = None
+
+
 class PlaidStatus(BaseModel):
     configured: bool
     connected: bool
     institution: str
     environment: str
     items_connected: int
+
+
+class PlaidItemResponse(BaseModel):
+    id: int
+    item_id: str
+    institution: Optional[str] = None
+    last_synced: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PlaidLinkTokenResponse(BaseModel):
@@ -124,7 +144,7 @@ class PlaidExchangeResponse(BaseModel):
 
 
 class PlaidSyncResponse(BaseModel):
-    item_id: str
+    item_id: str | None
     accounts_synced: int
     synced_at: datetime
 
@@ -164,6 +184,46 @@ class CanvasGradeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ClassMeetingBase(BaseModel):
+    name: str = Field(min_length=1)
+    days: list[int] = Field(min_length=1)
+    start: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    room: Optional[str] = None
+
+    @field_validator("days")
+    @classmethod
+    def validate_days(cls, days: list[int]) -> list[int]:
+        if any(day < 0 or day > 6 for day in days):
+            raise ValueError("days must use JavaScript weekday values from 0 (Sunday) to 6 (Saturday)")
+        return sorted(set(days))
+
+
+class ClassMeetingCreate(ClassMeetingBase):
+    pass
+
+
+class ClassMeetingUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1)
+    days: Optional[list[int]] = Field(default=None, min_length=1)
+    start: Optional[str] = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    end: Optional[str] = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    room: Optional[str] = None
+
+    @field_validator("days")
+    @classmethod
+    def validate_days(cls, days: list[int] | None) -> list[int] | None:
+        if days is not None and any(day < 0 or day > 6 for day in days):
+            raise ValueError("days must use JavaScript weekday values from 0 (Sunday) to 6 (Saturday)")
+        return sorted(set(days)) if days is not None else None
+
+
+class ClassMeetingResponse(ClassMeetingBase):
+    id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ManualExamCreate(BaseModel):
     course_name: str
     title: str
@@ -179,6 +239,45 @@ class ManualExamResponse(ManualExamCreate):
 
 class GradeOverrideUpdate(BaseModel):
     local_override: Optional[str] = None
+
+
+class CalendarNoteUpsert(BaseModel):
+    content: Optional[str] = None
+    day_log: Optional[str] = None
+
+
+class CalendarNoteResponse(BaseModel):
+    id: int
+    note_date: date
+    content: str
+    day_log: Optional[str] = None
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TodoItemCreate(BaseModel):
+    description: str
+    due_date: Optional[datetime] = None
+    recurrence: Literal["none", "daily", "weekly"] = "none"
+
+
+class TodoItemUpdate(BaseModel):
+    description: Optional[str] = None
+    due_date: Optional[datetime] = None
+    is_completed: Optional[bool] = None
+    recurrence: Optional[Literal["none", "daily", "weekly"]] = None
+
+
+class TodoItemResponse(BaseModel):
+    id: int
+    description: str
+    due_date: Optional[datetime] = None
+    is_completed: bool
+    recurrence: Literal["none", "daily", "weekly"]
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ClockStatusResponse(BaseModel):

@@ -1,3 +1,5 @@
+"""SQLAlchemy engine, session factory, and declarative base shared by models.py and main.py."""
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 

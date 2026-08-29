@@ -1,11 +1,20 @@
+"""Piranesi FastAPI app: work/pay tracking, academics, calendar/todos, finance, and Canvas/Plaid sync routes."""
+
 import os
 import json
+import base64
+import hashlib
+import time
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrlRequest, urlopen
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from plaid import Environment
 from plaid.api import plaid_api
@@ -15,11 +24,14 @@ from plaid.exceptions import ApiException
 from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
 from plaid.model.country_code import CountryCode
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
+from plaid.model.item_remove_request import ItemRemoveRequest
+from plaid.model.liabilities_get_request import LiabilitiesGetRequest
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
 from plaid.model.products import Products
+from plaid.model.webhook_verification_key_get_request import WebhookVerificationKeyGetRequest
 from sqlalchemy.orm import Session
-from database import engine, Base, SessionLocal
+from database import SessionLocal
 import models, schemas
 
 
@@ -65,7 +77,7 @@ def canvas_is_configured() -> bool:
 
 
 def canvas_get(path: str) -> list | dict:
-    request = Request(
+    request = UrlRequest(
         f"{get_canvas_api_url()}{path}",
         headers={
             "Authorization": f"Bearer {os.getenv('CANVAS_API_TOKEN', '').strip()}",
@@ -176,11 +188,69 @@ def model_to_dict(model: object) -> dict:
 
 
 def plaid_products() -> list[Products]:
-    return [Products(item) for item in parse_csv_env("PLAID_PRODUCTS", "transactions")]
+    requested = parse_csv_env("PLAID_PRODUCTS", "transactions,liabilities")
+    # liabilities is required to fetch credit card due dates/minimum payments
+    if "liabilities" not in requested:
+        requested.append("liabilities")
+    return [Products(item) for item in dict.fromkeys(requested)]
 
 
 def plaid_countries() -> list[CountryCode]:
     return [CountryCode(item.upper()) for item in parse_csv_env("PLAID_COUNTRY_CODES", "US")]
+
+
+_webhook_verification_keys: dict[str, ec.EllipticCurvePublicKey] = {}
+
+
+def _b64url_decode(segment: str) -> bytes:
+    return base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))
+
+
+def get_webhook_verification_key(key_id: str) -> ec.EllipticCurvePublicKey:
+    cached = _webhook_verification_keys.get(key_id)
+    if cached:
+        return cached
+
+    response = get_plaid_client().webhook_verification_key_get(
+        WebhookVerificationKeyGetRequest(key_id=key_id)
+    )
+    key_data = model_to_dict(response).get("key", {})
+    x = int.from_bytes(_b64url_decode(key_data["x"]), "big")
+    y = int.from_bytes(_b64url_decode(key_data["y"]), "big")
+    public_key = ec.EllipticCurvePublicNumbers(x, y, ec.SECP256R1()).public_key()
+    _webhook_verification_keys[key_id] = public_key
+    return public_key
+
+
+def verify_plaid_webhook(raw_body: bytes, signed_jwt: str) -> dict:
+    """Validate a Plaid webhook's ES256 JWT signature and body hash. Raises HTTPException on failure."""
+    try:
+        header_b64, payload_b64, signature_b64 = signed_jwt.split(".")
+        header = json.loads(_b64url_decode(header_b64))
+        payload = json.loads(_b64url_decode(payload_b64))
+        signature = _b64url_decode(signature_b64)
+    except (ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=401, detail="Malformed webhook signature") from exc
+
+    if header.get("alg") != "ES256" or len(signature) != 64:
+        raise HTTPException(status_code=401, detail="Unsupported webhook signature algorithm")
+
+    try:
+        public_key = get_webhook_verification_key(header["kid"])
+        der_signature = encode_dss_signature(
+            int.from_bytes(signature[:32], "big"), int.from_bytes(signature[32:], "big")
+        )
+        public_key.verify(der_signature, f"{header_b64}.{payload_b64}".encode("ascii"), ec.ECDSA(hashes.SHA256()))
+    except (ApiException, InvalidSignature, KeyError) as exc:
+        raise HTTPException(status_code=401, detail="Invalid webhook signature") from exc
+
+    if abs(time.time() - float(payload.get("iat", 0))) > 300:
+        raise HTTPException(status_code=401, detail="Webhook signature expired")
+
+    if hashlib.sha256(raw_body).hexdigest() != payload.get("request_body_sha256"):
+        raise HTTPException(status_code=401, detail="Webhook body hash mismatch")
+
+    return payload
 
 
 def sync_balances_for_item(
@@ -202,9 +272,17 @@ def sync_balances_for_item(
 
         external_item_key = f"{item_id}:{account_id}"
         balances = account.get("balances", {})
-        current_balance = balances.get("current")
-        if current_balance is None:
+        # Depository (checking/savings) accounts: banks like BofA show the "available" balance
+        # (which nets out pending holds) as the primary figure, not "current".
+        # Credit/loan accounts should keep "current" as the primary balance.
+        if account.get("type") == "depository":
             current_balance = balances.get("available")
+            if current_balance is None:
+                current_balance = balances.get("current")
+        else:
+            current_balance = balances.get("current")
+            if current_balance is None:
+                current_balance = balances.get("available")
         if current_balance is None:
             current_balance = 0.0
 
@@ -218,7 +296,16 @@ def sync_balances_for_item(
             .filter(models.FinancialAccount.plaid_item_id == external_item_key)
             .first()
         )
+        if not existing:
+            # Relinking the same institution creates a new Plaid item_id, so fall back to
+            # matching by name to avoid duplicating accounts already tracked under an older item.
+            existing = (
+                db.query(models.FinancialAccount)
+                .filter(models.FinancialAccount.account_name == account.get("name"))
+                .first()
+            )
         if existing:
+            existing.plaid_item_id = external_item_key
             existing.account_name = account.get("name", existing.account_name)
             existing.current_balance = float(current_balance)
             existing.account_type = account_type
@@ -243,8 +330,6 @@ def sync_balances_for_item(
 
 
 load_env_file()
-
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Piranesi API")
 
@@ -297,6 +382,8 @@ def clock_status(session: models.WorkClockSession) -> schemas.ClockStatusRespons
         elapsed_hours=elapsed_hours,
     )
 
+
+# --- WORK CLOCK ENDPOINTS ---
 
 @app.get("/work/clock", response_model=schemas.ClockStatusResponse)
 def get_clock_status(db: Session = Depends(get_db)):
@@ -442,6 +529,8 @@ def get_shift_summary(
     )
 
 
+# --- ACADEMIC TASK ENDPOINTS ---
+
 @app.post("/tasks/", response_model=schemas.AcademicTaskResponse)
 def create_task(task: schemas.AcademicTaskCreate, db: Session = Depends(get_db)):
     db_task = models.AcademicTask(**task.model_dump())
@@ -484,6 +573,8 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"deleted": 1, "task_id": task_id}
 
+
+# --- CANVAS INTEGRATION ENDPOINTS ---
 
 @app.get("/integrations/canvas/courses", response_model=list[schemas.CanvasCourseResponse])
 def list_canvas_courses(db: Session = Depends(get_db)):
@@ -573,6 +664,8 @@ def sync_canvas_full(db: Session = Depends(get_db)):
     return assignment_sync
 
 
+# --- MANUAL EXAM ENDPOINTS ---
+
 @app.post("/exams/", response_model=schemas.ManualExamResponse)
 def create_manual_exam(exam: schemas.ManualExamCreate, db: Session = Depends(get_db)):
     db_exam = models.ManualExam(**exam.model_dump())
@@ -595,6 +688,84 @@ def delete_manual_exam(exam_id: int, db: Session = Depends(get_db)):
     db.delete(exam)
     db.commit()
     return {"deleted": 1, "exam_id": exam_id}
+
+
+# --- CALENDAR NOTE ENDPOINTS (per-day notes + day log shown on the calendar) ---
+
+@app.get("/calendar/notes/", response_model=list[schemas.CalendarNoteResponse])
+def list_calendar_notes(db: Session = Depends(get_db)):
+    return db.query(models.CalendarNote).order_by(models.CalendarNote.note_date.asc()).all()
+
+
+@app.put("/calendar/notes/{note_date}", response_model=schemas.CalendarNoteResponse)
+def upsert_calendar_note(note_date: date, payload: schemas.CalendarNoteUpsert, db: Session = Depends(get_db)):
+    note = db.query(models.CalendarNote).filter(models.CalendarNote.note_date == note_date).first()
+    if not note:
+        note = models.CalendarNote(note_date=note_date, content="")
+        db.add(note)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(note, field, value)
+    note.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(note)
+    return note
+
+
+@app.delete("/calendar/notes/{note_date}")
+def delete_calendar_note(note_date: date, db: Session = Depends(get_db)):
+    note = db.query(models.CalendarNote).filter(models.CalendarNote.note_date == note_date).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Calendar note not found")
+    db.delete(note)
+    db.commit()
+    return {"deleted": 1, "note_date": str(note_date)}
+
+
+# --- TODO ENDPOINTS (manual week-based checklist, shown on the homepage) ---
+
+@app.post("/todos/", response_model=schemas.TodoItemResponse)
+def create_todo(todo: schemas.TodoItemCreate, db: Session = Depends(get_db)):
+    db_todo = models.TodoItem(**todo.model_dump())
+    db.add(db_todo)
+    db.commit()
+    db.refresh(db_todo)
+    return db_todo
+
+
+@app.get("/todos/", response_model=list[schemas.TodoItemResponse])
+def list_todos(db: Session = Depends(get_db)):
+    return db.query(models.TodoItem).order_by(models.TodoItem.created_at.asc()).all()
+
+
+@app.patch("/todos/{todo_id}", response_model=schemas.TodoItemResponse)
+def update_todo(todo_id: int, payload: schemas.TodoItemUpdate, db: Session = Depends(get_db)):
+    todo = db.query(models.TodoItem).filter(models.TodoItem.id == todo_id).first()
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    changes = payload.model_dump(exclude_unset=True)
+    recurrence = changes.get("recurrence", todo.recurrence)
+    if changes.get("is_completed") is True and recurrence in {"daily", "weekly"}:
+        interval = timedelta(days=1 if recurrence == "daily" else 7)
+        next_due = (todo.due_date or datetime.now()) + interval
+        while next_due <= datetime.now():
+            next_due += interval
+        changes["due_date"] = next_due
+        changes["is_completed"] = False
+    for field, value in changes.items():
+        setattr(todo, field, value)
+    db.commit()
+    db.refresh(todo)
+    return todo
+
+
+@app.delete("/todos/{todo_id}")
+def delete_todo(todo_id: int, db: Session = Depends(get_db)):
+    todo = db.query(models.TodoItem).filter(models.TodoItem.id == todo_id).first()
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    db.delete(todo)
+    db.commit()
+    return {"deleted": 1, "todo_id": todo_id}
 
 
 @app.get("/integrations/canvas/status", response_model=schemas.CanvasStatus)
@@ -691,6 +862,8 @@ def sync_canvas_assignments(db: Session = Depends(get_db)):
     )
 
 
+# --- FINANCE ENDPOINTS ---
+
 @app.post("/finance/accounts/", response_model=schemas.FinancialAccountResponse)
 def create_financial_account(
     account: schemas.FinancialAccountCreate,
@@ -759,6 +932,101 @@ def get_finance_summary(db: Session = Depends(get_db)):
     )
 
 
+# --- CLASS MEETING ENDPOINTS ---
+
+@app.post("/class-meetings/", response_model=schemas.ClassMeetingResponse)
+def create_class_meeting(payload: schemas.ClassMeetingCreate, db: Session = Depends(get_db)):
+    meeting = models.ClassMeeting(**payload.model_dump())
+    db.add(meeting)
+    db.commit()
+    db.refresh(meeting)
+    return meeting
+
+
+@app.get("/class-meetings/", response_model=list[schemas.ClassMeetingResponse])
+def list_class_meetings(db: Session = Depends(get_db)):
+    return db.query(models.ClassMeeting).order_by(models.ClassMeeting.start.asc(), models.ClassMeeting.name.asc()).all()
+
+
+@app.patch("/class-meetings/{meeting_id}", response_model=schemas.ClassMeetingResponse)
+def update_class_meeting(
+    meeting_id: int,
+    payload: schemas.ClassMeetingUpdate,
+    db: Session = Depends(get_db),
+):
+    meeting = db.query(models.ClassMeeting).filter(models.ClassMeeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Class meeting not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(meeting, field, value)
+    db.commit()
+    db.refresh(meeting)
+    return meeting
+
+
+@app.delete("/class-meetings/{meeting_id}")
+def delete_class_meeting(meeting_id: int, db: Session = Depends(get_db)):
+    meeting = db.query(models.ClassMeeting).filter(models.ClassMeeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Class meeting not found")
+    db.delete(meeting)
+    db.commit()
+    return {"deleted": 1, "meeting_id": meeting_id}
+
+
+@app.get("/finance/liabilities", response_model=list[schemas.LiabilityInfo])
+def get_liabilities(db: Session = Depends(get_db)):
+    if not plaid_is_configured():
+        raise HTTPException(status_code=400, detail="Plaid credentials are missing")
+
+    items = db.query(models.PlaidItem).filter(models.PlaidItem.access_token.isnot(None)).all()
+    if not items:
+        return []
+
+    plaid_client = get_plaid_client()
+    results: list[schemas.LiabilityInfo] = []
+
+    for item in items:
+        try:
+            response = plaid_client.liabilities_get(LiabilitiesGetRequest(access_token=item.access_token))
+        except ApiException:
+            # item may not have granted the liabilities product; skip it
+            continue
+
+        payload = model_to_dict(response)
+        credit_by_account_id = {
+            credit.get("account_id"): credit
+            for credit in (payload.get("liabilities") or {}).get("credit") or []
+        }
+        # Plaid can take a while to generate liability details after linking, so fall back
+        # to the plain account list (still returned even when "credit" data is null) and
+        # surface those as pending rather than silently omitting them.
+        credit_accounts = [account for account in payload.get("accounts") or [] if account.get("type") == "credit"]
+
+        for account_payload in credit_accounts:
+            plaid_account_id = account_payload.get("account_id")
+            credit = credit_by_account_id.get(plaid_account_id, {})
+            external_key = f"{item.item_id}:{plaid_account_id}"
+            account = (
+                db.query(models.FinancialAccount)
+                .filter(models.FinancialAccount.plaid_item_id == external_key)
+                .first()
+            )
+            results.append(
+                schemas.LiabilityInfo(
+                    account_id=account.id if account else None,
+                    plaid_account_id=plaid_account_id,
+                    account_name=account.account_name if account else account_payload.get("name", "Unknown credit card"),
+                    next_payment_due_date=credit.get("next_payment_due_date"),
+                    minimum_payment_amount=credit.get("minimum_payment_amount"),
+                )
+            )
+
+    return results
+
+
+# --- PLAID INTEGRATION ENDPOINTS ---
+
 @app.get("/integrations/plaid/status", response_model=schemas.PlaidStatus)
 def get_plaid_status(db: Session = Depends(get_db)):
     has_keys = plaid_is_configured()
@@ -778,6 +1046,69 @@ def get_plaid_status(db: Session = Depends(get_db)):
     )
 
 
+@app.get("/integrations/plaid/items", response_model=list[schemas.PlaidItemResponse])
+def list_plaid_items(db: Session = Depends(get_db)):
+    return db.query(models.PlaidItem).order_by(models.PlaidItem.created_at.asc()).all()
+
+
+@app.delete("/integrations/plaid/items/{item_id}")
+def disconnect_plaid_item(item_id: str, db: Session = Depends(get_db)):
+    plaid_item = db.query(models.PlaidItem).filter(models.PlaidItem.item_id == item_id).first()
+    if not plaid_item and item_id.isdigit():
+        plaid_item = db.query(models.PlaidItem).filter(models.PlaidItem.id == int(item_id)).first()
+    if not plaid_item:
+        raise HTTPException(status_code=404, detail="Plaid item not found")
+
+    try:
+        get_plaid_client().item_remove(ItemRemoveRequest(access_token=plaid_item.access_token))
+    except ApiException as exc:
+        raise HTTPException(status_code=400, detail=f"Plaid item removal error: {exc}") from exc
+
+    account_prefix = f"{plaid_item.item_id}:%"
+    accounts_deleted = (
+        db.query(models.FinancialAccount)
+        .filter(models.FinancialAccount.plaid_item_id.like(account_prefix))
+        .delete(synchronize_session=False)
+    )
+    db.delete(plaid_item)
+
+    external_item_id = plaid_item.item_id
+    remaining_items = db.query(models.PlaidItem).filter(models.PlaidItem.id != plaid_item.id).count()
+    state = db.query(models.PlaidConnectionState).first()
+    if state:
+        state.is_connected = remaining_items > 0
+        state.updated_at = datetime.utcnow()
+    db.commit()
+    return {"deleted": 1, "item_id": external_item_id, "accounts_deleted": accounts_deleted}
+
+
+@app.post("/integrations/plaid/webhook")
+async def receive_plaid_webhook(request: Request, db: Session = Depends(get_db)):
+    raw_body = await request.body()
+    signed_jwt = request.headers.get("plaid-verification")
+    if not signed_jwt:
+        raise HTTPException(status_code=401, detail="Missing webhook verification header")
+
+    verify_plaid_webhook(raw_body, signed_jwt)
+
+    try:
+        payload = json.loads(raw_body)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Malformed webhook body") from exc
+
+    webhook_type = payload.get("webhook_type")
+    webhook_code = payload.get("webhook_code")
+    item_id = payload.get("item_id")
+
+    if webhook_type == "LIABILITIES" and item_id:
+        plaid_item = db.query(models.PlaidItem).filter(models.PlaidItem.item_id == item_id).first()
+        if plaid_item:
+            plaid_item.liabilities_updated_at = datetime.utcnow()
+            db.commit()
+
+    return {"acknowledged": True, "webhook_type": webhook_type, "webhook_code": webhook_code}
+
+
 @app.post("/integrations/plaid/link-token", response_model=schemas.PlaidLinkTokenResponse)
 def create_plaid_link_token(payload: schemas.PlaidLinkTokenCreateRequest):
     if not plaid_is_configured():
@@ -794,6 +1125,10 @@ def create_plaid_link_token(payload: schemas.PlaidLinkTokenCreateRequest):
     redirect_uri = (os.getenv("PLAID_REDIRECT_URI") or "").strip()
     if redirect_uri:
         request_kwargs["redirect_uri"] = redirect_uri
+
+    webhook_url = (os.getenv("PLAID_WEBHOOK_URL") or "").strip()
+    if webhook_url:
+        request_kwargs["webhook"] = webhook_url
 
     link_request = LinkTokenCreateRequest(**request_kwargs)
 
@@ -855,30 +1190,32 @@ def exchange_public_token(
 
 @app.post("/integrations/plaid/sync", response_model=schemas.PlaidSyncResponse)
 def sync_plaid_balances(item_id: str | None = None, db: Session = Depends(get_db)):
-    plaid_item = None
     if item_id:
-        plaid_item = db.query(models.PlaidItem).filter(models.PlaidItem.item_id == item_id).first()
+        plaid_items = [db.query(models.PlaidItem).filter(models.PlaidItem.item_id == item_id).first()]
+        if not plaid_items[0]:
+            raise HTTPException(status_code=404, detail="No connected Plaid item found")
     else:
-        plaid_item = db.query(models.PlaidItem).order_by(models.PlaidItem.id.desc()).first()
+        # No item_id means "sync everything", not just the most recently linked item.
+        plaid_items = db.query(models.PlaidItem).all()
+        if not plaid_items:
+            raise HTTPException(status_code=404, detail="No connected Plaid item found")
 
-    if not plaid_item:
-        raise HTTPException(status_code=404, detail="No connected Plaid item found")
-
-    if not plaid_item.access_token:
-        raise HTTPException(status_code=400, detail="Plaid item is missing access token")
-
-    try:
-        synced_count = sync_balances_for_item(
-            db,
-            get_plaid_client(),
-            plaid_item.access_token,
-            plaid_item.item_id,
-        )
-    except ApiException as exc:
-        raise HTTPException(status_code=400, detail=f"Plaid sync error: {exc}") from exc
+    synced_count = 0
+    for plaid_item in plaid_items:
+        if not plaid_item.access_token:
+            continue
+        try:
+            synced_count += sync_balances_for_item(
+                db,
+                get_plaid_client(),
+                plaid_item.access_token,
+                plaid_item.item_id,
+            )
+        except ApiException as exc:
+            raise HTTPException(status_code=400, detail=f"Plaid sync error: {exc}") from exc
 
     return schemas.PlaidSyncResponse(
-        item_id=plaid_item.item_id,
+        item_id=item_id,
         accounts_synced=synced_count,
         synced_at=datetime.utcnow(),
     )
