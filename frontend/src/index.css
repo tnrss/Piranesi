@@ -2,14 +2,13 @@
   --text: #ffffff;
   --heading: #bd064c;
   --bg: #23282b;
-  --bg-image: none;
   --accent: #bd064c;
   --mono: 'Space Mono', monospace;
 
   font: 16px/145% var(--mono);
   letter-spacing: 0;
   color: var(--text);
-  background: var(--bg-image), var(--bg);
+  background: var(--bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -20,16 +19,11 @@
   }
 }
 
-:root[data-theme='piranesi'] {
-  --bg-image: linear-gradient(to top, #000000 0%, #10184a 45%, #394b9f 100%);
-}
-
 #root {
   min-height: 100vh;
 }
 
 body {
   margin: 0;
-  background: var(--bg-image), var(--bg);
-  background-attachment: fixed;
+  background: var(--bg);
 }

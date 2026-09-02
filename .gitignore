@@ -6,7 +6,6 @@ venv/
 # Local database and environment
 backend/.env
 backend/piranesi.db
-/piranesi.db
 
 # Frontend local env (if added later)
 frontend/.env

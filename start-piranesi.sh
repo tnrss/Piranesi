@@ -11,8 +11,6 @@ if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   exit 1
 fi
 
-(cd "$BACKEND_DIR" && "$VENV_DIR/bin/alembic" upgrade head)
-
 if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
   echo "Installing frontend dependencies..."
   (cd "$FRONTEND_DIR" && npm install)

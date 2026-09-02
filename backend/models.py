@@ -1,8 +1,6 @@
-"""SQLAlchemy ORM models for every Piranesi table (work, academics, finance, Canvas/Plaid sync, calendar)."""
-
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, Column, Date, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, Integer, String
 from database import Base
 
 class WorkShift(Base):
@@ -52,7 +50,6 @@ class PlaidItem(Base):
     access_token = Column(String)
     institution = Column(String, nullable=True)
     last_synced = Column(DateTime, nullable=True)
-    liabilities_updated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -88,17 +85,6 @@ class CanvasCourseGrade(Base):
     last_synced = Column(DateTime, default=datetime.utcnow)
 
 
-class ClassMeeting(Base):
-    __tablename__ = "class_meetings"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    days = Column(JSON, nullable=False)
-    start = Column(String, nullable=False)
-    end = Column(String, nullable=False)
-    room = Column(String, nullable=True)
-
-
 class ManualExam(Base):
     __tablename__ = "manual_exams"
 
@@ -107,27 +93,6 @@ class ManualExam(Base):
     title = Column(String)
     exam_date = Column(DateTime)
     notes = Column(String, nullable=True)
-
-
-class CalendarNote(Base):
-    __tablename__ = "calendar_notes"
-
-    id = Column(Integer, primary_key=True, index=True)
-    note_date = Column(Date, unique=True, index=True)
-    content = Column(String, default="")
-    day_log = Column(String, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class TodoItem(Base):
-    __tablename__ = "todo_items"
-
-    id = Column(Integer, primary_key=True, index=True)
-    description = Column(String)
-    due_date = Column(DateTime, nullable=True)
-    is_completed = Column(Boolean, default=False)
-    recurrence = Column(String, nullable=False, default="none")
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class WorkClockSession(Base):
