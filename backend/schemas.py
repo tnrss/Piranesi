@@ -1,7 +1,7 @@
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 class WorkShiftBase(BaseModel):
     date: date
@@ -164,6 +164,52 @@ class CanvasGradeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ClassMeetingBase(BaseModel):
+    name: str = Field(min_length=1)
+    days: list[int] = Field(min_length=1)
+    start: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    room: Optional[str] = None
+
+    @field_validator("days")
+    @classmethod
+    def validate_days(cls, days: list[int]) -> list[int]:
+        if any(day < 0 or day > 6 for day in days):
+            raise ValueError("days must use values from 0 (Sunday) to 6 (Saturday)")
+        return sorted(set(days))
+
+    @model_validator(mode="after")
+    def validate_time_range(self):
+        if self.end <= self.start:
+            raise ValueError("end must be later than start")
+        return self
+
+
+class ClassMeetingCreate(ClassMeetingBase):
+    pass
+
+
+class ClassMeetingUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1)
+    days: Optional[list[int]] = Field(default=None, min_length=1)
+    start: Optional[str] = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    end: Optional[str] = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    room: Optional[str] = None
+
+    @field_validator("days")
+    @classmethod
+    def validate_days(cls, days: list[int] | None) -> list[int] | None:
+        if days is not None and any(day < 0 or day > 6 for day in days):
+            raise ValueError("days must use values from 0 (Sunday) to 6 (Saturday)")
+        return sorted(set(days)) if days is not None else None
+
+
+class ClassMeetingResponse(ClassMeetingBase):
+    id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ManualExamCreate(BaseModel):
     course_name: str
     title: str
@@ -179,6 +225,61 @@ class ManualExamResponse(ManualExamCreate):
 
 class GradeOverrideUpdate(BaseModel):
     local_override: Optional[str] = None
+
+
+class CalendarNoteUpsert(BaseModel):
+    content: Optional[str] = None
+    day_log: Optional[str] = None
+
+
+class CalendarNoteResponse(BaseModel):
+    id: int
+    note_date: date
+    content: str
+    day_log: Optional[str] = None
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TodoItemCreate(BaseModel):
+    description: str = Field(min_length=1)
+    due_date: Optional[datetime] = None
+    recurrence: Literal["none", "daily", "weekly"] = "none"
+
+
+class TodoItemUpdate(BaseModel):
+    description: Optional[str] = Field(default=None, min_length=1)
+    due_date: Optional[datetime] = None
+    is_completed: Optional[bool] = None
+    recurrence: Optional[Literal["none", "daily", "weekly"]] = None
+
+
+class TodoItemResponse(BaseModel):
+    id: int
+    description: str
+    due_date: Optional[datetime] = None
+    is_completed: bool
+    recurrence: Literal["none", "daily", "weekly"]
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CalendarDayResponse(BaseModel):
+    date: date
+    class_meetings: list[ClassMeetingResponse]
+    shifts: list[WorkShiftResponse]
+    assignments: list[AcademicTaskResponse]
+    exams: list[ManualExamResponse]
+    todos: list[TodoItemResponse]
+    note: Optional[CalendarNoteResponse] = None
+
+
+class CalendarWeekResponse(BaseModel):
+    start: date
+    end: date
+    days: list[CalendarDayResponse]
 
 
 class ClockStatusResponse(BaseModel):

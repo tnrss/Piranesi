@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Piranesi Kiosk
+Exec=@PROJECT_DIR@/scripts/launch-kiosk.sh
+Terminal=false
+X-GNOME-Autostart-enabled=true

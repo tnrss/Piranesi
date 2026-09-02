@@ -1,0 +1,6 @@
+alembic==1.19.1
+fastapi==0.141.1
+plaid-python==43.0.0
+pydantic==2.13.4
+SQLAlchemy==2.0.52
+uvicorn==0.52.4

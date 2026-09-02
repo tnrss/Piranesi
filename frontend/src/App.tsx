@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useEffectEvent, useState } from 'react'
 import './App.css'
 import { parseCommand } from './terminal/CommandParser'
 import { TerminalUI, type TerminalData } from './terminal/TerminalUI'
@@ -10,6 +10,26 @@ const themes: Record<string, { bg: string; text: string; accent: string }> = {
   matrix: { bg: '#050805', text: '#72f27b', accent: '#27c93f' },
   amber: { bg: '#100c05', text: '#ffe6a3', accent: '#ffb000' },
   ice: { bg: '#07141c', text: '#d8f6ff', accent: '#38c8ff' },
+}
+
+function localDateKey(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function mondayFor(date = new Date()) {
+  const monday = new Date(date)
+  const weekday = monday.getDay()
+  monday.setDate(monday.getDate() + (weekday === 0 ? -6 : 1 - weekday))
+  return localDateKey(monday)
+}
+
+function shiftDate(dateValue: string, days: number) {
+  const date = new Date(`${dateValue}T12:00:00`)
+  date.setDate(date.getDate() + days)
+  return localDateKey(date)
 }
 
 function parseCommandDate(value: string | undefined): string | null {
@@ -38,11 +58,13 @@ const emptyData: TerminalData = {
   accounts: [],
   financeSummary: null,
   plaidStatus: null,
+  calendarWeek: null,
 }
 
 function App() {
   const [data, setData] = useState<TerminalData>(emptyData)
   const [status, setStatus] = useState('booting...')
+  const [weekStart, setWeekStart] = useState(() => mondayFor())
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('piranesi-theme') || 'default'
@@ -72,15 +94,16 @@ function App() {
         fetch(`${API_BASE}/finance/accounts/`),
         fetch(`${API_BASE}/finance/summary`),
         fetch(`${API_BASE}/integrations/plaid/status`),
+        fetch(`${API_BASE}/calendar/week?start=${weekStart}`),
       ])
 
       if (responses.some((response) => !response.ok)) {
         throw new Error('one or more API requests failed')
       }
 
-      const [shifts, workSummary, clockStatus, tasks, exams, courses, grades, accounts, financeSummary, plaidStatus] =
+      const [shifts, workSummary, clockStatus, tasks, exams, courses, grades, accounts, financeSummary, plaidStatus, calendarWeek] =
         await Promise.all(responses.map((response) => response.json()))
-      setData({ workSummary, clockStatus, shifts, tasks, exams, courses, grades, accounts, financeSummary, plaidStatus })
+      setData({ workSummary, clockStatus, shifts, tasks, exams, courses, grades, accounts, financeSummary, plaidStatus, calendarWeek })
       setStatus('online')
     } catch {
       setStatus('backend unavailable // run ./start-piranesi.sh')
@@ -90,9 +113,35 @@ function App() {
     }
   }
 
+  const loadDataForWeek = useEffectEvent(loadData)
+
   useEffect(() => {
-    void loadData()
-  }, [])
+    void loadDataForWeek()
+  }, [weekStart])
+
+  function navigateWeek(direction: -1 | 0 | 1) {
+    setWeekStart((current) => direction === 0 ? mondayFor() : shiftDate(current, direction * 7))
+  }
+
+  async function toggleTodo(id: number, completed: boolean) {
+    const response = await fetch(`${API_BASE}/todos/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_completed: completed }),
+    })
+    setStatus(response.ok ? 'todo updated' : 'todo update failed')
+    if (response.ok) await loadData()
+  }
+
+  async function saveCalendarNote(noteDate: string, content: string) {
+    const response = await fetch(`${API_BASE}/calendar-notes/${noteDate}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    })
+    setStatus(response.ok ? `note saved // ${noteDate}` : 'note save failed')
+    if (response.ok) await loadData()
+  }
 
   async function onCommand(input: string) {
     const command = parseCommand(input)
@@ -144,6 +193,7 @@ function App() {
     if (command.action === 'add') {
       const flags = command.flags
       let path = ''
+      let method = 'POST'
       let body: Record<string, unknown> = {}
       if (command.entity === 'shift' || command.entity === 'work') {
         const shiftDate = flags.date || (isDateLike(command.args[1]) ? command.args[1] : undefined)
@@ -161,6 +211,28 @@ function App() {
       } else if (command.entity === 'account') {
         path = '/finance/accounts/'
         body = { plaid_item_id: flags.item || `manual-${Date.now()}`, account_name: flags.name || command.args[0], current_balance: Number(flags.balance || command.args[1]), account_type: flags.type || 'checking' }
+      } else if (command.entity === 'class') {
+        const weekdays: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 }
+        path = '/class-meetings/'
+        body = {
+          name: flags.name || command.args[0],
+          days: (flags.days || '').split(',').map((day) => weekdays[day.trim().slice(0, 3).toLowerCase()]).filter((day) => day !== undefined),
+          start: flags.start,
+          end: flags.end,
+          room: flags.room || null,
+        }
+      } else if (command.entity === 'todo') {
+        path = '/todos/'
+        body = {
+          description: flags.description || flags.title || command.args.join(' '),
+          due_date: flags.due ? parseCommandDate(flags.due) : null,
+          recurrence: flags.recurrence || 'none',
+        }
+      } else if (command.entity === 'note') {
+        const noteDate = flags.date || command.args[0]
+        path = `/calendar-notes/${noteDate}`
+        method = 'PUT'
+        body = { content: flags.content || command.args.slice(1).join(' ') }
       }
       if (!path || Object.values(body).some((value) => value === undefined || (typeof value === 'number' && Number.isNaN(value)))) {
         setStatus('usage: add shift --hours=8 [--date=YYYY-MM-DD] | add assignment --course="CS" --title="Lab" --due=ISO')
@@ -170,13 +242,16 @@ function App() {
         (path === '/shifts/' && (body.date === null || body.hours_worked === undefined || Number.isNaN(body.hours_worked))) ||
         (path === '/tasks/' && (!body.course_name || !body.title || body.due_date === null)) ||
         (path === '/exams/' && (!body.title || body.exam_date === null)) ||
-        (path === '/finance/accounts/' && (!body.account_name || body.current_balance === undefined || Number.isNaN(body.current_balance)))
+        (path === '/finance/accounts/' && (!body.account_name || body.current_balance === undefined || Number.isNaN(body.current_balance))) ||
+        (path === '/class-meetings/' && (!body.name || !(body.days as number[]).length || !body.start || !body.end)) ||
+        (path === '/todos/' && !body.description) ||
+        (command.entity === 'note' && (!flags.date && !command.args[0]))
       if (requiredFieldMissing) {
         setStatus('usage: add exam [name] [month/day] // or use --date=YYYY-MM-DD')
         return
       }
       try {
-        const response = await fetch(`${API_BASE}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        const response = await fetch(`${API_BASE}${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         if (!response.ok) {
           const result = await response.json() as { detail?: string }
           setStatus(result.detail || 'add failed // check command fields')
@@ -198,7 +273,7 @@ function App() {
         return
       }
       const label = entity === 'assignment' || entity === 'task' ? 'task' : entity
-      const path = label === 'shift' ? `/shifts/${id}` : label === 'task' ? `/tasks/${id}` : label === 'exam' ? `/exams/${id}` : `/finance/accounts/${id}`
+      const path = label === 'shift' ? `/shifts/${id}` : label === 'task' ? `/tasks/${id}` : label === 'exam' ? `/exams/${id}` : label === 'class' ? `/class-meetings/${id}` : label === 'todo' ? `/todos/${id}` : `/finance/accounts/${id}`
       if (!window.confirm(`Delete ${label} #${id}?`)) {
         setStatus('delete cancelled')
         return
@@ -215,8 +290,9 @@ function App() {
         setStatus(`usage: assignment ${command.action} <id>`)
         return
       }
-      const response = await fetch(`${API_BASE}/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_completed: command.action === 'done' }) })
-      setStatus(response.ok ? `assignment #${id} ${command.action === 'done' ? 'completed' : 'reopened'}` : 'assignment update failed')
+      const resource = command.entity === 'todo' ? 'todos' : 'tasks'
+      const response = await fetch(`${API_BASE}/${resource}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_completed: command.action === 'done' }) })
+      setStatus(response.ok ? `${command.entity || 'assignment'} #${id} ${command.action === 'done' ? 'completed' : 'reopened'}` : 'item update failed')
       if (response.ok) await loadData()
       return
     }
@@ -232,7 +308,16 @@ function App() {
     setStatus(`${command.entity || 'command'} // ready`)
   }
 
-  return <TerminalUI data={data} status={status} onCommand={(input) => void onCommand(input)} />
+  return (
+    <TerminalUI
+      data={data}
+      status={status}
+      onCommand={(input) => void onCommand(input)}
+      onNavigateWeek={navigateWeek}
+      onToggleTodo={(id, completed) => void toggleTodo(id, completed)}
+      onSaveCalendarNote={(noteDate, content) => void saveCalendarNote(noteDate, content)}
+    />
+  )
 }
 
 export default App

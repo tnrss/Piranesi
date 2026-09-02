@@ -14,16 +14,20 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
 }
 
 #root {
-  min-height: 100vh;
+  height: 100dvh;
 }
 
 body {
   margin: 0;
   background: var(--bg);
+  overflow: hidden;
+}
+
+button,
+input,
+textarea {
+  letter-spacing: 0;
 }

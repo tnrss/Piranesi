@@ -1,0 +1,17 @@
+[Unit]
+Description=Piranesi desktop operations appliance
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@PROJECT_DIR@
+EnvironmentFile=@ENV_FILE@
+ExecStart=@PROJECT_DIR@/scripts/run-production.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

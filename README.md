@@ -93,6 +93,34 @@ This first build includes backend APIs, a neobrutalist frontend, and a tracked r
 
 ## Run Locally
 
+## Raspberry Pi Appliance
+
+Piranesi can run as a single loopback-only FastAPI process that serves both the
+API and the built React frontend. The Raspberry Pi setup targets 64-bit
+Raspberry Pi OS Bookworm with Chromium on a 7-inch landscape display.
+
+From a fresh clone:
+
+```bash
+./scripts/setup-pi.sh --check
+./scripts/setup-pi.sh --install-system
+```
+
+The setup creates an isolated Python environment, installs locked frontend
+dependencies, builds `frontend/dist`, initializes and migrates SQLite, installs
+the backend systemd service, and adds Chromium kiosk startup to the current
+desktop user's session. Piranesi remains available only at
+`http://127.0.0.1:8000`.
+
+Configuration and data are kept outside the checkout:
+
+- Configuration: `~/.config/piranesi/piranesi.env`
+- Database: `~/.local/share/piranesi/piranesi.db`
+- Service logs: `journalctl -u piranesi.service`
+
+See `docs/raspberry-pi.md` for deployment, updates, backups, troubleshooting,
+display settings, and kiosk controls.
+
 ## One-Click Launcher
 
 The root-level `start-piranesi.sh` starts both the FastAPI backend and Vite frontend, waits for both services, and opens the dashboard plus API documentation in your browser.

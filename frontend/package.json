@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20.19 <21 || >=22.12"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -10,6 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/space-mono": "^5.2.8",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-plaid-link": "^5.0.0"

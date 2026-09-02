@@ -3,10 +3,10 @@ import json
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from plaid import Environment
 from plaid.api import plaid_api
 from plaid.api_client import ApiClient
@@ -18,23 +18,11 @@ from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchan
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
 from plaid.model.products import Products
+from sqlalchemy import text
 from sqlalchemy.orm import Session
-from database import engine, Base, SessionLocal
+from config import FRONTEND_DIST, SERVE_FRONTEND
+from database import SessionLocal
 import models, schemas
-
-
-def load_env_file() -> None:
-    env_path = Path(__file__).resolve().parent / ".env"
-    if not env_path.exists():
-        return
-
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 def env_float(name: str, default: float) -> float:
@@ -242,24 +230,22 @@ def sync_balances_for_item(
     return synced_count
 
 
-load_env_file()
-
-Base.metadata.create_all(bind=engine)
-
-app = FastAPI(title="Piranesi API")
+api_app = FastAPI(title="Piranesi API", redoc_url=None)
+app = api_app
 
 DEFAULT_HOURLY_RATE = env_float("DEFAULT_HOURLY_RATE", 18.0)
 DEFAULT_HOURS_CAP = env_float("DEFAULT_HOURS_CAP", 28.0)
 PAYROLL_DEDUCTION_RATE = env_float("PAYROLL_DEDUCTION_RATE", 0.0765)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1):[0-9]+$",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if not SERVE_FRONTEND:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1):[0-9]+$",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # This function safely opens and closes the database connection for each request
 def get_db():
@@ -269,9 +255,10 @@ def get_db():
     finally:
         db.close()
 
-@app.get("/")
-def read_root():
-    return {"status": "Piranesi backend is running"}
+@app.get("/health")
+def read_health(db: Session = Depends(get_db)):
+    db.execute(text("SELECT 1"))
+    return {"status": "ok", "database": "connected"}
 
 # --- WORK SHIFT ENDPOINTS ---
 
@@ -597,6 +584,177 @@ def delete_manual_exam(exam_id: int, db: Session = Depends(get_db)):
     return {"deleted": 1, "exam_id": exam_id}
 
 
+@app.post("/class-meetings/", response_model=schemas.ClassMeetingResponse)
+def create_class_meeting(
+    payload: schemas.ClassMeetingCreate,
+    db: Session = Depends(get_db),
+):
+    meeting = models.ClassMeeting(**payload.model_dump())
+    db.add(meeting)
+    db.commit()
+    db.refresh(meeting)
+    return meeting
+
+
+@app.get("/class-meetings/", response_model=list[schemas.ClassMeetingResponse])
+def list_class_meetings(db: Session = Depends(get_db)):
+    return (
+        db.query(models.ClassMeeting)
+        .order_by(models.ClassMeeting.start.asc(), models.ClassMeeting.name.asc())
+        .all()
+    )
+
+
+@app.patch("/class-meetings/{meeting_id}", response_model=schemas.ClassMeetingResponse)
+def update_class_meeting(
+    meeting_id: int,
+    payload: schemas.ClassMeetingUpdate,
+    db: Session = Depends(get_db),
+):
+    meeting = db.query(models.ClassMeeting).filter(models.ClassMeeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Class meeting not found")
+    changes = payload.model_dump(exclude_unset=True)
+    if changes.get("end", meeting.end) <= changes.get("start", meeting.start):
+        raise HTTPException(status_code=422, detail="end must be later than start")
+    for field, value in changes.items():
+        setattr(meeting, field, value)
+    db.commit()
+    db.refresh(meeting)
+    return meeting
+
+
+@app.delete("/class-meetings/{meeting_id}")
+def delete_class_meeting(meeting_id: int, db: Session = Depends(get_db)):
+    meeting = db.query(models.ClassMeeting).filter(models.ClassMeeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Class meeting not found")
+    db.delete(meeting)
+    db.commit()
+    return {"deleted": 1, "meeting_id": meeting_id}
+
+
+@app.get("/calendar-notes/{note_date}", response_model=schemas.CalendarNoteResponse | None)
+def get_calendar_note(note_date: date, db: Session = Depends(get_db)):
+    return db.query(models.CalendarNote).filter(models.CalendarNote.note_date == note_date).first()
+
+
+@app.put("/calendar-notes/{note_date}", response_model=schemas.CalendarNoteResponse)
+def upsert_calendar_note(
+    note_date: date,
+    payload: schemas.CalendarNoteUpsert,
+    db: Session = Depends(get_db),
+):
+    note = db.query(models.CalendarNote).filter(models.CalendarNote.note_date == note_date).first()
+    if note is None:
+        note = models.CalendarNote(note_date=note_date, content="")
+        db.add(note)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(note, field, value)
+    note.updated_at = datetime.now()
+    db.commit()
+    db.refresh(note)
+    return note
+
+
+@app.delete("/calendar-notes/{note_date}")
+def delete_calendar_note(note_date: date, db: Session = Depends(get_db)):
+    note = db.query(models.CalendarNote).filter(models.CalendarNote.note_date == note_date).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Calendar note not found")
+    db.delete(note)
+    db.commit()
+    return {"deleted": 1, "note_date": note_date}
+
+
+@app.post("/todos/", response_model=schemas.TodoItemResponse)
+def create_todo(todo: schemas.TodoItemCreate, db: Session = Depends(get_db)):
+    db_todo = models.TodoItem(**todo.model_dump())
+    db.add(db_todo)
+    db.commit()
+    db.refresh(db_todo)
+    return db_todo
+
+
+@app.get("/todos/", response_model=list[schemas.TodoItemResponse])
+def list_todos(db: Session = Depends(get_db)):
+    return db.query(models.TodoItem).order_by(models.TodoItem.created_at.asc()).all()
+
+
+@app.patch("/todos/{todo_id}", response_model=schemas.TodoItemResponse)
+def update_todo(
+    todo_id: int,
+    payload: schemas.TodoItemUpdate,
+    db: Session = Depends(get_db),
+):
+    todo = db.query(models.TodoItem).filter(models.TodoItem.id == todo_id).first()
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    changes = payload.model_dump(exclude_unset=True)
+    recurrence = changes.get("recurrence", todo.recurrence)
+    if changes.get("is_completed") is True and recurrence in {"daily", "weekly"}:
+        interval = timedelta(days=1 if recurrence == "daily" else 7)
+        now = datetime.now()
+        next_due = (todo.due_date or now) + interval
+        while next_due <= now:
+            next_due += interval
+        changes["due_date"] = next_due
+        changes["is_completed"] = False
+    for field, value in changes.items():
+        setattr(todo, field, value)
+    db.commit()
+    db.refresh(todo)
+    return todo
+
+
+@app.delete("/todos/{todo_id}")
+def delete_todo(todo_id: int, db: Session = Depends(get_db)):
+    todo = db.query(models.TodoItem).filter(models.TodoItem.id == todo_id).first()
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    db.delete(todo)
+    db.commit()
+    return {"deleted": 1, "todo_id": todo_id}
+
+
+@app.get("/calendar/week", response_model=schemas.CalendarWeekResponse)
+def get_calendar_week(start: date, db: Session = Depends(get_db)):
+    end = start + timedelta(days=6)
+    start_at = datetime.combine(start, datetime.min.time())
+    end_at = datetime.combine(end + timedelta(days=1), datetime.min.time())
+    meetings = db.query(models.ClassMeeting).all()
+    shifts = db.query(models.WorkShift).filter(models.WorkShift.date.between(start, end)).all()
+    assignments = db.query(models.AcademicTask).filter(
+        models.AcademicTask.due_date >= start_at,
+        models.AcademicTask.due_date < end_at,
+    ).all()
+    exams = db.query(models.ManualExam).filter(
+        models.ManualExam.exam_date >= start_at,
+        models.ManualExam.exam_date < end_at,
+    ).all()
+    todos = db.query(models.TodoItem).filter(
+        models.TodoItem.due_date >= start_at,
+        models.TodoItem.due_date < end_at,
+    ).all()
+    notes = db.query(models.CalendarNote).filter(models.CalendarNote.note_date.between(start, end)).all()
+    notes_by_date = {note.note_date: note for note in notes}
+
+    days = []
+    for offset in range(7):
+        day = start + timedelta(days=offset)
+        javascript_weekday = (day.weekday() + 1) % 7
+        days.append(schemas.CalendarDayResponse(
+            date=day,
+            class_meetings=[meeting for meeting in meetings if javascript_weekday in meeting.days],
+            shifts=[shift for shift in shifts if shift.date == day],
+            assignments=[task for task in assignments if task.due_date.date() == day],
+            exams=[exam for exam in exams if exam.exam_date.date() == day],
+            todos=[todo for todo in todos if todo.due_date and todo.due_date.date() == day],
+            note=notes_by_date.get(day),
+        ))
+    return schemas.CalendarWeekResponse(start=start, end=end, days=days)
+
+
 @app.get("/integrations/canvas/status", response_model=schemas.CanvasStatus)
 def get_canvas_status():
     return schemas.CanvasStatus(
@@ -882,3 +1040,28 @@ def sync_plaid_balances(item_id: str | None = None, db: Session = Depends(get_db
         accounts_synced=synced_count,
         synced_at=datetime.utcnow(),
     )
+
+
+root_app = FastAPI(title="Piranesi", docs_url=None, redoc_url=None, openapi_url=None)
+root_app.mount("/api", api_app)
+
+if SERVE_FRONTEND:
+    frontend_index = FRONTEND_DIST / "index.html"
+    if not frontend_index.is_file():
+        raise RuntimeError(
+            f"Production frontend not found at {frontend_index}. Run npm run build in frontend/."
+        )
+
+    @root_app.get("/{path:path}", include_in_schema=False)
+    def serve_frontend(path: str):
+        requested = (FRONTEND_DIST / path).resolve()
+        if requested.is_relative_to(FRONTEND_DIST) and requested.is_file():
+            cache_control = (
+                "public, max-age=31536000, immutable"
+                if requested.parent == FRONTEND_DIST / "assets"
+                else "no-cache"
+            )
+            return FileResponse(requested, headers={"Cache-Control": cache_control})
+        return FileResponse(frontend_index, headers={"Cache-Control": "no-cache"})
+
+app = root_app

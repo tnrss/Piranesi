@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { getSuggestions, parseViewCommand, terminalCommands, type Suggestion, type TerminalCommand } from './CommandParser'
+import { WeekSchedule, type CalendarWeek } from './WeekSchedule'
 import './Terminal.css'
 
 type WorkSummary = {
@@ -31,19 +32,23 @@ export type TerminalData = {
   accounts: Account[]
   financeSummary: FinanceSummary | null
   plaidStatus: PlaidStatus | null
+  calendarWeek: CalendarWeek | null
 }
 
 type TerminalUIProps = {
   data: TerminalData
   status: string
   onCommand: (command: string) => void
+  onNavigateWeek: (direction: -1 | 0 | 1) => void
+  onToggleTodo: (id: number, completed: boolean) => void
+  onSaveCalendarNote: (noteDate: string, content: string) => void
 }
 
 function money(value: number | undefined) {
   return `$${(value ?? 0).toFixed(2)}`
 }
 
-export function TerminalUI({ data, status, onCommand }: TerminalUIProps) {
+export function TerminalUI({ data, status, onCommand, onNavigateWeek, onToggleTodo, onSaveCalendarNote }: TerminalUIProps) {
   const [input, setInput] = useState('')
   const [history, setHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
@@ -127,7 +132,9 @@ export function TerminalUI({ data, status, onCommand }: TerminalUIProps) {
   const showOverview = view === 'overview' || view === 'sync' || view === 'help' || view === 'clear'
 
   return (
-    <main className="terminal-shell" onClick={() => inputRef.current?.focus()}>
+    <main className="terminal-shell" onClick={(event) => {
+      if (!(event.target as HTMLElement).closest('button, input, textarea')) inputRef.current?.focus()
+    }}>
       <header className="terminal-header">
         <span className="terminal-brand">PIRANESI // LIFE LOG</span>
         <span className="terminal-status">{status}</span>
@@ -139,6 +146,14 @@ export function TerminalUI({ data, status, onCommand }: TerminalUIProps) {
       </section>
 
       <section className={`terminal-columns view-${view}`}>
+        {view === 'schedule' ? (
+          <WeekSchedule
+            week={data.calendarWeek}
+            onNavigate={onNavigateWeek}
+            onToggleTodo={onToggleTodo}
+            onSaveNote={onSaveCalendarNote}
+          />
+        ) : (<>
         <div className="terminal-pane">
           <div className="pane-title">ACADEMICS + WORK</div>
           {(showOverview || view === 'grades') && <div className="terminal-block">
@@ -154,7 +169,7 @@ export function TerminalUI({ data, status, onCommand }: TerminalUIProps) {
               )
             })}
           </div>}
-          {(showOverview || view === 'grades' || view === 'schedule') && <div className="terminal-block">
+          {(showOverview || view === 'grades') && <div className="terminal-block">
             <div className="block-title">ASSIGNMENTS / EXAMS</div>
             {data.tasks.filter((task) => !task.is_completed).slice(0, 8).map((task) => (
               <p key={task.id}><span className="accent">{new Date(task.due_date).toLocaleDateString()}</span> {task.course_name}: {task.title}</p>
@@ -164,7 +179,7 @@ export function TerminalUI({ data, status, onCommand }: TerminalUIProps) {
             ))}
             {data.tasks.filter((task) => !task.is_completed).length === 0 && data.exams.length === 0 && <p className="muted">nothing due</p>}
           </div>}
-          {(showOverview || view === 'work' || view === 'schedule') && <div className="terminal-block">
+          {(showOverview || view === 'work') && <div className="terminal-block">
             <div className="block-title">WORK / PAY</div>
             <p className={data.clockStatus?.is_clocked_in ? 'accent' : 'muted'}>
               {data.clockStatus?.is_clocked_in ? `clocked in // ${data.clockStatus.elapsed_hours}h elapsed` : 'clocked out'}
@@ -193,7 +208,7 @@ export function TerminalUI({ data, status, onCommand }: TerminalUIProps) {
             <p>configured: {data.plaidStatus?.configured ? 'yes' : 'no'}</p>
             <p>items: {data.plaidStatus?.items_connected ?? 0}</p>
           </div>}
-          {(showOverview || view === 'work' || view === 'schedule') && <div className="terminal-block">
+          {(showOverview || view === 'work') && <div className="terminal-block">
             <div className="block-title">SHIFTS</div>
             {data.shifts.slice(0, 8).map((shift) => (
               <p key={shift.id}><span className="accent">{shift.date}</span> {shift.hours_worked}h {shift.task_notes || ''}</p>
@@ -201,6 +216,7 @@ export function TerminalUI({ data, status, onCommand }: TerminalUIProps) {
             {data.shifts.length === 0 && <p className="muted">no shifts logged</p>}
           </div>}
         </div>
+        </>)}
       </section>
 
       <section className="terminal-history" aria-live="polite">

@@ -11,6 +11,8 @@ if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   exit 1
 fi
 
+(cd "$BACKEND_DIR" && "$VENV_DIR/bin/alembic" upgrade head)
+
 if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
   echo "Installing frontend dependencies..."
   (cd "$FRONTEND_DIR" && npm install)
@@ -23,7 +25,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if curl --silent --fail http://127.0.0.1:8000/ >/dev/null 2>&1; then
+if curl --silent --fail http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
   echo "Using existing backend at http://127.0.0.1:8000"
 else
   (
@@ -35,7 +37,7 @@ else
 fi
 
 for _ in {1..30}; do
-  if curl --silent --fail http://127.0.0.1:8000/ >/dev/null 2>&1; then
+  if curl --silent --fail http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
     break
   fi
   if [[ "${BACKEND_STARTED:-0}" == "1" ]] && ! kill -0 "$BACKEND_PID" 2>/dev/null; then
@@ -58,7 +60,7 @@ FRONTEND_PID=$!
 
 for _ in {1..30}; do
   if curl --silent --fail "http://127.0.0.1:$FRONTEND_PORT/" >/dev/null 2>&1 && \
-    curl --silent --fail http://127.0.0.1:8000/ >/dev/null 2>&1; then
+    curl --silent --fail http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
     break
   fi
   if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
@@ -73,7 +75,7 @@ for _ in {1..30}; do
 done
 
 APP_URL="http://127.0.0.1:$FRONTEND_PORT"
-API_URL="http://127.0.0.1:8000/docs"
+API_URL="http://127.0.0.1:8000/api/docs"
 if command -v xdg-open >/dev/null 2>&1; then
   xdg-open "$APP_URL" >/dev/null 2>&1 &
   xdg-open "$API_URL" >/dev/null 2>&1 &

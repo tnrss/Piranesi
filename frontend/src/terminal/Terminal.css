@@ -1,5 +1,5 @@
 .terminal-shell {
-  min-height: 100vh;
+  height: 100dvh;
   width: min(1240px, 100% - 2rem);
   margin: 0 auto;
   box-sizing: border-box;
@@ -59,6 +59,7 @@
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
   gap: 1rem;
   min-height: 0;
+  overflow: auto;
 }
 
 .terminal-pane {
@@ -140,6 +141,132 @@
   margin: 0.65rem 0;
 }
 
+.week-workspace {
+  grid-column: 1 / -1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  border: 1px solid color-mix(in srgb, var(--text) 55%, transparent);
+  overflow: hidden;
+}
+
+.week-toolbar {
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 40%, transparent);
+}
+
+.week-toolbar strong {
+  min-width: 9rem;
+  text-align: center;
+  color: var(--accent);
+}
+
+.week-toolbar button,
+.week-strip button {
+  border: 1px solid color-mix(in srgb, var(--text) 45%, transparent);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.week-toolbar button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+.week-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-height: 4.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 40%, transparent);
+}
+
+.week-strip button {
+  min-width: 0;
+  min-height: 4.5rem;
+  padding: 0.3rem 0.15rem;
+  display: grid;
+  place-items: center;
+  border-width: 0 1px 0 0;
+}
+
+.week-strip button:last-child {
+  border-right: 0;
+}
+
+.week-strip button.selected {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.week-strip span,
+.week-strip strong,
+.week-strip small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.day-workspace {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(14rem, 0.65fr);
+  overflow: hidden;
+}
+
+.day-agenda,
+.day-note {
+  min-height: 0;
+  overflow: auto;
+  padding: 0.65rem 0.8rem;
+}
+
+.day-agenda {
+  border-right: 1px dashed color-mix(in srgb, var(--text) 35%, transparent);
+}
+
+.day-agenda p {
+  margin: 0.35rem 0;
+}
+
+.day-todo {
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.day-todo input {
+  width: 1.25rem;
+  height: 1.25rem;
+  accent-color: var(--accent);
+}
+
+.day-note {
+  display: grid;
+  grid-template-rows: auto minmax(5rem, 1fr);
+  gap: 0.45rem;
+}
+
+.day-note textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 5rem;
+  resize: none;
+  border: 1px solid color-mix(in srgb, var(--text) 45%, transparent);
+  border-radius: 0;
+  padding: 0.55rem;
+  background: color-mix(in srgb, var(--bg) 92%, black);
+  color: var(--text);
+  font: inherit;
+}
+
 .terminal-suggestions button {
   width: 100%;
   display: flex;
@@ -169,27 +296,112 @@
   color: var(--accent);
 }
 
-@media (max-width: 800px) {
+@media (max-width: 900px), (max-height: 650px) {
   .terminal-shell {
-    width: min(100% - 1rem, 1240px);
-    padding-top: 0.5rem;
+    width: calc(100% - 0.75rem);
+    padding: 0.35rem 0;
+    gap: 0.35rem;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    font-size: 14px;
   }
 
-  .terminal-header {
-    align-items: flex-start;
-    flex-direction: column;
+  .terminal-header,
+  .terminal-footer {
+    padding: 0.4rem 0.55rem;
   }
 
   .terminal-status {
-    margin-left: 0;
-    text-align: left;
+    max-width: 48%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .terminal-overview,
+  .terminal-history,
+  .terminal-footer > p {
+    display: none;
   }
 
   .terminal-columns {
     grid-template-columns: 1fr;
   }
 
+  .view-overview .terminal-pane:nth-child(2),
+  .view-grades .terminal-pane:nth-child(2),
+  .view-money .terminal-pane:nth-child(1) {
+    display: none;
+  }
+
   .command-links {
-    gap: 0.6rem 0.9rem;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+    margin-bottom: 0.35rem;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .command-links button {
+    flex: 0 0 auto;
+    padding: 0 0.35rem;
+  }
+
+  .terminal-footer {
+    position: relative;
+  }
+
+  .terminal-suggestions {
+    position: absolute;
+    z-index: 5;
+    right: 0;
+    bottom: 100%;
+    left: 0;
+    max-height: min(10rem, 38dvh);
+    margin: 0;
+    background: var(--bg);
+  }
+
+  .week-toolbar {
+    justify-content: space-between;
+  }
+
+  .week-toolbar strong {
+    min-width: 0;
+  }
+
+  .week-strip,
+  .week-strip button {
+    min-height: 3.75rem;
+  }
+
+  .day-workspace {
+    grid-template-columns: minmax(0, 1.2fr) minmax(12rem, 0.8fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .day-workspace {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .day-agenda,
+  .day-note {
+    overflow: visible;
+  }
+
+  .day-agenda {
+    border-right: 0;
+    border-bottom: 1px dashed color-mix(in srgb, var(--text) 35%, transparent);
+  }
+}
+
+@media (pointer: coarse) {
+  .command-links button,
+  .terminal-suggestions button,
+  .week-toolbar button,
+  .week-strip button,
+  .day-todo {
+    min-height: 44px;
   }
 }

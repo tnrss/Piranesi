@@ -9,17 +9,18 @@ export type TerminalCommand =
   | 'clear'
   | 'clock in'
   | 'clock out'
-export type CommandEntity = 'shift' | 'assignment' | 'task' | 'exam' | 'account' | 'course' | 'grades' | 'money' | 'work' | 'schedule' | 'canvas' | 'plaid' | 'all' | 'theme'
+export type CommandEntity = 'shift' | 'assignment' | 'task' | 'exam' | 'account' | 'class' | 'todo' | 'note' | 'course' | 'grades' | 'money' | 'work' | 'schedule' | 'canvas' | 'plaid' | 'all' | 'theme'
 export type CommandAction = 'add' | 'delete' | 'edit' | 'done' | 'reopen' | 'list' | 'show' | 'reset' | 'sync' | 'clock-in' | 'clock-out' | 'theme' | 'help' | 'clear'
 
 export type ParsedCommand = { entity: CommandEntity | null; action: CommandAction | null; args: string[]; flags: Record<string, string>; raw: string }
 export type Suggestion = { value: string; detail: string; insert?: string }
 
-const entities: Record<string, CommandEntity> = { shift: 'shift', shifts: 'shift', work: 'work', assignment: 'assignment', assignments: 'assignment', task: 'task', tasks: 'task', exam: 'exam', exams: 'exam', account: 'account', accounts: 'account', course: 'course', courses: 'course', grades: 'grades', money: 'money', schedule: 'schedule', canvas: 'canvas', plaid: 'plaid', all: 'all', theme: 'theme' }
+const entities: Record<string, CommandEntity> = { shift: 'shift', shifts: 'shift', work: 'work', assignment: 'assignment', assignments: 'assignment', task: 'task', tasks: 'task', exam: 'exam', exams: 'exam', account: 'account', accounts: 'account', class: 'class', classes: 'class', todo: 'todo', todos: 'todo', note: 'note', notes: 'note', course: 'course', courses: 'course', grades: 'grades', money: 'money', schedule: 'schedule', canvas: 'canvas', plaid: 'plaid', all: 'all', theme: 'theme' }
 const actions: Record<string, CommandAction> = { add: 'add', create: 'add', delete: 'delete', remove: 'delete', edit: 'edit', update: 'edit', done: 'done', complete: 'done', reopen: 'reopen', undone: 'reopen', list: 'list', show: 'show', view: 'show', reset: 'reset', sync: 'sync', help: 'help', clear: 'clear' }
 
 export const registry: Suggestion[] = [
   { value: 'add shift', detail: 'record hours worked' }, { value: 'add assignment', detail: 'create a manual assignment' }, { value: 'add exam', detail: 'create a manual exam' }, { value: 'add account', detail: 'add a financial account' },
+  { value: 'add class', detail: 'add a weekly class meeting' }, { value: 'add todo', detail: 'add a one-time or recurring todo' }, { value: 'add note', detail: 'save a note for a date' },
   { value: 'delete shift', detail: 'remove a shift (confirmation required)' }, { value: 'delete assignment', detail: 'remove an assignment (confirmation required)' }, { value: 'delete exam', detail: 'remove an exam (confirmation required)' }, { value: 'delete account', detail: 'remove an account (confirmation required)' },
   { value: 'assignment done', detail: 'mark an assignment complete' }, { value: 'assignment reopen', detail: 'reopen an assignment' }, { value: 'show courses', detail: 'list active Canvas courses' }, { value: 'show grades', detail: 'list current grades' }, { value: 'show schedule', detail: 'list assignments, exams, and shifts' }, { value: 'show accounts', detail: 'list accounts and balances' },
   { value: 'sync canvas', detail: 'sync Canvas courses, grades, and assignments' }, { value: 'sync plaid', detail: 'sync connected Plaid balances' }, { value: 'sync all', detail: 'sync Canvas and Plaid' }, { value: 'work reset', detail: 'clear this week’s shifts (confirmation required)' }, { value: 'help', detail: 'show command help' }, { value: 'clear', detail: 'return to overview' },
@@ -47,7 +48,7 @@ export function parseCommand(input: string): ParsedCommand {
   for (const token of remainder) {
     if (token.startsWith('--')) {
       const [key, ...value] = token.slice(2).split('=')
-      flags[key] = value.join('=') || 'true'
+      flags[key] = (value.join('=') || 'true').replace(/^["']|["']$/g, '')
     } else args.push(token)
   }
   return { entity, action, args, flags, raw: input }
