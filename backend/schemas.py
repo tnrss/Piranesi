@@ -124,7 +124,7 @@ class PlaidExchangeResponse(BaseModel):
 
 
 class PlaidSyncResponse(BaseModel):
-    item_id: str
+    item_id: Optional[str]
     accounts_synced: int
     synced_at: datetime
 

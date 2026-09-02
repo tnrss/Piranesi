@@ -19,12 +19,13 @@ const entities: Record<string, CommandEntity> = { shift: 'shift', shifts: 'shift
 const actions: Record<string, CommandAction> = { add: 'add', create: 'add', delete: 'delete', remove: 'delete', edit: 'edit', update: 'edit', done: 'done', complete: 'done', reopen: 'reopen', undone: 'reopen', list: 'list', show: 'show', view: 'show', reset: 'reset', sync: 'sync', help: 'help', clear: 'clear' }
 
 export const registry: Suggestion[] = [
-  { value: 'add shift', detail: 'record hours worked' }, { value: 'add assignment', detail: 'create a manual assignment' }, { value: 'add exam', detail: 'create a manual exam' }, { value: 'add account', detail: 'add a financial account' },
+  { value: 'add shift', detail: 'record hours worked' }, { value: 'add assignment', detail: 'create a manual assignment' }, { value: 'add exam', detail: 'create a manual exam' }, { value: 'add account', detail: 'add a financial account' }, { value: 'add account plaid', detail: 'connect a bank with Plaid Link' },
   { value: 'add class', detail: 'add a weekly class meeting' }, { value: 'add todo', detail: 'add a one-time or recurring todo' }, { value: 'add note', detail: 'save a note for a date' },
   { value: 'delete shift', detail: 'remove a shift (confirmation required)' }, { value: 'delete assignment', detail: 'remove an assignment (confirmation required)' }, { value: 'delete exam', detail: 'remove an exam (confirmation required)' }, { value: 'delete account', detail: 'remove an account (confirmation required)' },
   { value: 'assignment done', detail: 'mark an assignment complete' }, { value: 'assignment reopen', detail: 'reopen an assignment' }, { value: 'show courses', detail: 'list active Canvas courses' }, { value: 'show grades', detail: 'list current grades' }, { value: 'show schedule', detail: 'list assignments, exams, and shifts' }, { value: 'show accounts', detail: 'list accounts and balances' },
   { value: 'sync canvas', detail: 'sync Canvas courses, grades, and assignments' }, { value: 'sync plaid', detail: 'sync connected Plaid balances' }, { value: 'sync all', detail: 'sync Canvas and Plaid' }, { value: 'work reset', detail: 'clear this week’s shifts (confirmation required)' }, { value: 'help', detail: 'show command help' }, { value: 'clear', detail: 'return to overview' },
   { value: 'clock in', detail: 'start tracking a shift now' }, { value: 'clock out', detail: 'end tracking and save the shift' },
+  { value: 'theme piranesi', detail: 'indigo, ivory, and antique gold' },
   { value: 'theme default', detail: 'charcoal and reddish pink' }, { value: 'theme matrix', detail: 'black and terminal green' }, { value: 'theme amber', detail: 'black and warm amber' }, { value: 'theme ice', detail: 'navy and electric cyan' },
 ]
 

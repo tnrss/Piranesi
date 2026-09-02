@@ -190,13 +190,14 @@ def sync_balances_for_item(
 
         external_item_key = f"{item_id}:{account_id}"
         balances = account.get("balances", {})
-        current_balance = balances.get("current")
+        plaid_account_type = str(account.get("type", "unknown"))
+        current_balance = balances.get("available") if plaid_account_type.lower() == "depository" else balances.get("current")
         if current_balance is None:
-            current_balance = balances.get("available")
+            current_balance = balances.get("current") if plaid_account_type.lower() == "depository" else balances.get("available")
         if current_balance is None:
             current_balance = 0.0
 
-        account_type = account.get("type", "unknown")
+        account_type = plaid_account_type
         account_subtype = account.get("subtype")
         if account_subtype:
             account_type = f"{account_type}/{account_subtype}"
@@ -206,7 +207,14 @@ def sync_balances_for_item(
             .filter(models.FinancialAccount.plaid_item_id == external_item_key)
             .first()
         )
+        if not existing:
+            existing = (
+                db.query(models.FinancialAccount)
+                .filter(models.FinancialAccount.account_name == account.get("name"))
+                .first()
+            )
         if existing:
+            existing.plaid_item_id = external_item_key
             existing.account_name = account.get("name", existing.account_name)
             existing.current_balance = float(current_balance)
             existing.account_type = account_type
@@ -1013,30 +1021,32 @@ def exchange_public_token(
 
 @app.post("/integrations/plaid/sync", response_model=schemas.PlaidSyncResponse)
 def sync_plaid_balances(item_id: str | None = None, db: Session = Depends(get_db)):
-    plaid_item = None
     if item_id:
         plaid_item = db.query(models.PlaidItem).filter(models.PlaidItem.item_id == item_id).first()
+        plaid_items = [plaid_item] if plaid_item else []
     else:
-        plaid_item = db.query(models.PlaidItem).order_by(models.PlaidItem.id.desc()).first()
+        plaid_items = db.query(models.PlaidItem).order_by(models.PlaidItem.id.asc()).all()
 
-    if not plaid_item:
+    if not plaid_items:
         raise HTTPException(status_code=404, detail="No connected Plaid item found")
 
-    if not plaid_item.access_token:
-        raise HTTPException(status_code=400, detail="Plaid item is missing access token")
-
+    plaid_client = get_plaid_client()
+    synced_count = 0
     try:
-        synced_count = sync_balances_for_item(
-            db,
-            get_plaid_client(),
-            plaid_item.access_token,
-            plaid_item.item_id,
-        )
+        for plaid_item in plaid_items:
+            if not plaid_item.access_token:
+                raise HTTPException(status_code=400, detail=f"Plaid item {plaid_item.item_id} is missing access token")
+            synced_count += sync_balances_for_item(
+                db,
+                plaid_client,
+                plaid_item.access_token,
+                plaid_item.item_id,
+            )
     except ApiException as exc:
         raise HTTPException(status_code=400, detail=f"Plaid sync error: {exc}") from exc
 
     return schemas.PlaidSyncResponse(
-        item_id=plaid_item.item_id,
+        item_id=item_id,
         accounts_synced=synced_count,
         synced_at=datetime.utcnow(),
     )

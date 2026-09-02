@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent, useState } from 'react'
+import { usePlaidLink } from 'react-plaid-link'
 import './App.css'
 import { parseCommand } from './terminal/CommandParser'
 import { TerminalUI, type TerminalData } from './terminal/TerminalUI'
@@ -10,6 +11,7 @@ const themes: Record<string, { bg: string; text: string; accent: string }> = {
   matrix: { bg: '#050805', text: '#72f27b', accent: '#27c93f' },
   amber: { bg: '#100c05', text: '#ffe6a3', accent: '#ffb000' },
   ice: { bg: '#07141c', text: '#d8f6ff', accent: '#38c8ff' },
+  piranesi: { bg: '#394b9f', text: '#fffbee', accent: '#d3c48a' },
 }
 
 function localDateKey(date: Date) {
@@ -65,11 +67,66 @@ function App() {
   const [data, setData] = useState<TerminalData>(emptyData)
   const [status, setStatus] = useState('booting...')
   const [weekStart, setWeekStart] = useState(() => mondayFor())
+  const [plaidLinkToken, setPlaidLinkToken] = useState<string | null>(null)
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('piranesi-theme') || 'default'
-    applyTheme(savedTheme)
+    const savedTheme = localStorage.getItem('piranesi-theme')
+    const needsThemeRestore = savedTheme === 'default' && !localStorage.getItem('piranesi-theme-restored')
+    applyTheme(needsThemeRestore ? 'piranesi' : savedTheme || 'piranesi')
+    localStorage.setItem('piranesi-theme-restored', '1')
   }, [])
+
+  const { open: openPlaidLink, ready: plaidLinkReady } = usePlaidLink({
+    token: plaidLinkToken,
+    onSuccess: (publicToken) => void handlePlaidSuccess(publicToken),
+    onExit: () => setPlaidLinkToken(null),
+  })
+
+  useEffect(() => {
+    if (plaidLinkReady && plaidLinkToken) openPlaidLink()
+  }, [plaidLinkReady, plaidLinkToken, openPlaidLink])
+
+  async function startPlaidLink() {
+    setStatus('creating plaid link...')
+    try {
+      const response = await fetch(`${API_BASE}/integrations/plaid/link-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const result = await response.json() as { link_token?: string; detail?: string }
+      if (!response.ok || !result.link_token) {
+        setStatus(result.detail || 'plaid link request failed')
+        return
+      }
+      setPlaidLinkToken(result.link_token)
+      setStatus('opening plaid link...')
+    } catch {
+      setStatus('plaid link failed // backend unavailable')
+    }
+  }
+
+  async function handlePlaidSuccess(publicToken: string | null) {
+    setPlaidLinkToken(null)
+    if (!publicToken) return
+    setStatus('linking plaid account...')
+    try {
+      const response = await fetch(`${API_BASE}/integrations/plaid/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public_token: publicToken }),
+      })
+      const result = await response.json() as { accounts_synced?: number; detail?: string }
+      if (!response.ok) {
+        setStatus(result.detail || 'plaid link failed')
+        return
+      }
+      await loadData()
+      setStatus(`plaid linked // ${result.accounts_synced ?? 0} accounts synced`)
+    } catch {
+      setStatus('plaid link failed // backend unavailable')
+    }
+  }
 
   function applyTheme(name: string) {
     const theme = themes[name]
@@ -77,6 +134,7 @@ function App() {
     document.documentElement.style.setProperty('--bg', theme.bg)
     document.documentElement.style.setProperty('--text', theme.text)
     document.documentElement.style.setProperty('--accent', theme.accent)
+    document.documentElement.dataset.theme = name
     localStorage.setItem('piranesi-theme', name)
     return true
   }
@@ -146,8 +204,8 @@ function App() {
   async function onCommand(input: string) {
     const command = parseCommand(input)
     if (command.action === 'theme') {
-      const name = (command.args[0] || 'default').toLowerCase()
-      setStatus(applyTheme(name) ? `theme ${name} applied` : 'unknown theme // try theme matrix, amber, ice, or default')
+      const name = (command.args[0] || 'piranesi').toLowerCase()
+      setStatus(applyTheme(name) ? `theme ${name} applied` : 'unknown theme // try theme piranesi, matrix, amber, ice, or default')
       return
     }
     if (command.action === 'clear') {
@@ -171,7 +229,7 @@ function App() {
       return
     }
     if (command.action === 'sync') {
-      const target = command.entity ?? command.args[0] ?? 'canvas'
+      const target = command.entity ?? command.args[0] ?? 'all'
       setStatus(`syncing ${target}...`)
       try {
         if (target === 'canvas' || target === 'all') {
@@ -208,6 +266,9 @@ function App() {
         const examDate = flags.date || flags.due || command.args.at(-1)
         path = '/exams/'
         body = { course_name: flags.course || 'Manual Exam', title: flags.title || command.args.slice(0, isDateLike(command.args.at(-1)) ? -1 : undefined).join(' '), exam_date: parseCommandDate(examDate), notes: flags.note || null }
+      } else if (command.entity === 'account' && command.args[0]?.toLowerCase() === 'plaid') {
+        await startPlaidLink()
+        return
       } else if (command.entity === 'account') {
         path = '/finance/accounts/'
         body = { plaid_item_id: flags.item || `manual-${Date.now()}`, account_name: flags.name || command.args[0], current_balance: Number(flags.balance || command.args[1]), account_type: flags.type || 'checking' }

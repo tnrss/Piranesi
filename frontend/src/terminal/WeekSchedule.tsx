@@ -105,7 +105,9 @@ export function WeekSchedule({ week, onNavigate, onToggleTodo, onSaveNote }: Wee
             <p key={`class-${meeting.id}`}><span className="accent">{meeting.start}–{meeting.end}</span> {meeting.name}{meeting.room ? ` // ${meeting.room}` : ''}</p>
           ))}
           {selectedDay.assignments.map((assignment) => (
-            <p key={`assignment-${assignment.id}`}><span className="accent">DUE</span> {assignment.course_name}: {assignment.title}</p>
+            <p key={`assignment-${assignment.id}`} className={assignment.is_completed ? 'assignment-completed' : undefined}>
+              <span className="accent">{assignment.is_completed ? 'DONE' : 'DUE'}</span> {assignment.course_name}: {assignment.title}
+            </p>
           ))}
           {selectedDay.exams.map((exam) => (
             <p key={`exam-${exam.id}`}><span className="warn">EXAM</span> {exam.course_name}: {exam.title}</p>

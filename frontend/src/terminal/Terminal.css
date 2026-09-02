@@ -94,6 +94,12 @@
   color: color-mix(in srgb, var(--text) 60%, transparent);
 }
 
+.assignment-completed,
+.assignment-completed .accent {
+  color: color-mix(in srgb, var(--text) 42%, transparent);
+  text-decoration: line-through;
+}
+
 .command-links {
   display: flex;
   gap: 1rem;
@@ -111,8 +117,19 @@
   cursor: pointer;
 }
 
+.terminal-action {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
 .command-links button:hover,
-.command-links button:focus-visible {
+.command-links button:focus-visible,
+.terminal-action:hover,
+.terminal-action:focus-visible {
   color: var(--text);
   text-decoration: underline;
   transform: none;

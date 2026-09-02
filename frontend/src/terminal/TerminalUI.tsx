@@ -130,6 +130,8 @@ export function TerminalUI({ data, status, onCommand, onNavigateWeek, onToggleTo
 
   const gradeByCourse = new Map(data.grades.map((grade) => [grade.canvas_course_id, grade]))
   const showOverview = view === 'overview' || view === 'sync' || view === 'help' || view === 'clear'
+  const openTasks = data.tasks.filter((task) => !task.is_completed)
+  const completedTasks = data.tasks.filter((task) => task.is_completed).slice(-4).reverse()
 
   return (
     <main className="terminal-shell" onClick={(event) => {
@@ -171,13 +173,15 @@ export function TerminalUI({ data, status, onCommand, onNavigateWeek, onToggleTo
           </div>}
           {(showOverview || view === 'grades') && <div className="terminal-block">
             <div className="block-title">ASSIGNMENTS / EXAMS</div>
-            {data.tasks.filter((task) => !task.is_completed).slice(0, 8).map((task) => (
-              <p key={task.id}><span className="accent">{new Date(task.due_date).toLocaleDateString()}</span> {task.course_name}: {task.title}</p>
+            {[...openTasks.slice(0, 8), ...completedTasks].map((task) => (
+              <p key={task.id} className={task.is_completed ? 'assignment-completed' : undefined}>
+                <span className="accent">{new Date(task.due_date).toLocaleDateString()}</span> {task.course_name}: {task.title}
+              </p>
             ))}
             {data.exams.map((exam) => (
               <p key={exam.id}><span className="warn">EXAM {new Date(exam.exam_date).toLocaleDateString()}</span> {exam.course_name}: {exam.title}</p>
             ))}
-            {data.tasks.filter((task) => !task.is_completed).length === 0 && data.exams.length === 0 && <p className="muted">nothing due</p>}
+            {data.tasks.length === 0 && data.exams.length === 0 && <p className="muted">nothing due</p>}
           </div>}
           {(showOverview || view === 'work') && <div className="terminal-block">
             <div className="block-title">WORK / PAY</div>
@@ -207,6 +211,7 @@ export function TerminalUI({ data, status, onCommand, onNavigateWeek, onToggleTo
             <p>environment: {data.plaidStatus?.environment ?? '--'}</p>
             <p>configured: {data.plaidStatus?.configured ? 'yes' : 'no'}</p>
             <p>items: {data.plaidStatus?.items_connected ?? 0}</p>
+            <button className="terminal-action" type="button" onClick={() => onCommand('add account plaid')}>[connect account]</button>
           </div>}
           {(showOverview || view === 'work') && <div className="terminal-block">
             <div className="block-title">SHIFTS</div>

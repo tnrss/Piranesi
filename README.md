@@ -16,9 +16,9 @@ This first build includes backend APIs, a neobrutalist frontend, and a tracked r
 - Highly customizable theme and modular feature surfaces.
 
 ### Design System Requirements
-- Accent: `#bd064c` (reddish pink)
-- Background: `#23282b` (gray)
-- Body text: white
+- Piranesi accent: `#d3c48a` (antique gold)
+- Piranesi background: black-to-indigo gradient ending at `#394b9f`
+- Piranesi body text: `#fffbee` (warm ivory)
 - Headings: accent-forward
 - Style: neobrutalism, responsive, modular
 
@@ -34,7 +34,7 @@ This first build includes backend APIs, a neobrutalist frontend, and a tracked r
 - [x] Weekly work summary endpoint (`GET /shifts/summary`) with cap + expected pay
 - [x] Academic task create/list/update endpoints
 - [x] Financial account create/list + finance summary endpoints
-- [x] Plaid integration status and link-token placeholder endpoints
+- [x] Live Plaid Link, token exchange, and all-account balance sync
 
 ### Phase 3: UI Implementation
 - [x] Initial neobrutalist dashboard prototype
@@ -44,7 +44,7 @@ This first build includes backend APIs, a neobrutalist frontend, and a tracked r
 - [x] Typed/clickable Work, Grades, Schedule, Money, Sync, Help, and Clear commands
 
 ### Phase 4: Next Steps (Planned)
-- [ ] Real Plaid SDK integration (`link_token/create`, `item/public_token/exchange`, `accounts/balance/get`)
+- [x] Real Plaid SDK integration (`link_token/create`, `item/public_token/exchange`, `accounts/balance/get`)
 - [x] Local secret management and environment-based config loading (`backend/.env`)
 - [ ] Calendar sync (Google/Outlook export/import)
 - [ ] Recurring assignments and reminders
@@ -54,7 +54,7 @@ This first build includes backend APIs, a neobrutalist frontend, and a tracked r
 ## API Overview
 
 ### Health
-- `GET /`
+- `GET /api/health`
 
 ### Work
 - `POST /shifts/`
@@ -187,8 +187,7 @@ Plaid real flow is now implemented:
 2. Ensure backend dependency is installed:
    - `pip install plaid-python`
 3. In the UI:
-   - Click "Create Plaid Link Token"
-   - Click "Connect Bank via Plaid Link"
+   - Open `Money` and click `[connect account]`, or type `add account plaid`.
    - Complete Plaid Link
 4. Backend exchanges `public_token` and syncs balances automatically.
 5. Use "Sync Plaid Balances" any time to refresh account balances.
@@ -212,12 +211,13 @@ The main screen is a combined terminal overview. Use the clickable commands at t
 - `Grades` - active Canvas courses and current/local grades
 - `Schedule` - assignments, manual exams, and work shifts
 - `Money` - account balances, liabilities, net worth, and Plaid status
-- `Sync` - full Canvas academic sync, including assignments and grades
+- `Sync` - full Canvas academic sync plus all connected Plaid balances
 - `Help` - show command reference in the status line
 - `Clear` - return to combined overview
 
 Theme presets can be changed from the prompt:
 
+- `theme piranesi` - indigo gradient, warm ivory, and antique gold (default)
 - `theme default` - Piranesi charcoal and reddish pink
 - `theme matrix` - black background and terminal green text
 - `theme amber` - black background and warm amber text
