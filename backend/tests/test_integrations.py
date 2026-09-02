@@ -95,13 +95,14 @@ def test_canvas_sync_marks_submitted_assignment_completed(tmp_path: Path, monkey
             return [{
                 "id": 9001,
                 "name": "Lab 1",
-                "due_at": "2026-09-04T17:00:00Z",
+                "due_at": "2026-09-07T04:59:59Z",
                 "has_submitted_submissions": True,
             }]
         raise AssertionError(f"Unexpected Canvas path: {path}")
 
     monkeypatch.setattr(main, "canvas_is_configured", lambda: True)
     monkeypatch.setattr(main, "canvas_get", fake_canvas_get)
+    monkeypatch.setenv("PIRANESI_TIMEZONE", "America/Chicago")
 
     try:
         with client:
@@ -111,6 +112,7 @@ def test_canvas_sync_marks_submitted_assignment_completed(tmp_path: Path, monkey
         task = database.query(models.AcademicTask).one()
         assert task.task_type == "Canvas Assignment"
         assert task.is_completed is True
+        assert task.due_date.isoformat() == "2026-09-06T23:59:59"
         database.close()
     finally:
         main.api_app.dependency_overrides.clear()

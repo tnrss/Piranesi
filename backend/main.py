@@ -3,6 +3,7 @@ import json
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -72,6 +73,19 @@ def canvas_course_instructor(course: dict) -> str | None:
     if teachers and isinstance(teachers[0], dict):
         return teachers[0].get("display_name") or teachers[0].get("name")
     return None
+
+
+def canvas_due_date(due_at: str) -> datetime:
+    parsed = datetime.fromisoformat(due_at.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed
+
+    timezone_name = os.getenv("PIRANESI_TIMEZONE", "").strip()
+    try:
+        target_timezone = ZoneInfo(timezone_name) if timezone_name else None
+    except ZoneInfoNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=f"Unknown PIRANESI_TIMEZONE: {timezone_name}") from exc
+    return parsed.astimezone(target_timezone).replace(tzinfo=None)
 
 
 def remove_null_canvas_courses(db: Session) -> None:
@@ -808,7 +822,7 @@ def sync_canvas_assignments(db: Session = Depends(get_db)):
                 continue
 
             assignments_found += 1
-            due_date = datetime.fromisoformat(due_at.replace("Z", "+00:00")).replace(tzinfo=None)
+            due_date = canvas_due_date(due_at)
             mapping = (
                 db.query(models.CanvasAssignment)
                 .filter(models.CanvasAssignment.canvas_assignment_id == str(assignment_id))

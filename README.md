@@ -202,6 +202,7 @@ Canvas uses a personal access token:
 5. Open Piranesi and click `Sync Canvas Assignments` in the Academics module.
 
 Only active courses are checked. Assignments with a due date are imported, and repeat syncs update the existing local task instead of duplicating it.
+Canvas UTC deadlines are converted to `PIRANESI_TIMEZONE` when set, or the host's local timezone otherwise, before they are placed on the weekly calendar.
 
 ## Terminal Commands
 
